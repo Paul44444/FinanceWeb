@@ -4,7 +4,7 @@ import NetworkCharts from "./NetworkCharts";
 
 import LiveLossChart from "./LiveLossChart";
 import type { LiveLossPoint } from "./LiveLossChart";
-import { API_BASE_URL } from "./config";
+//import { API_BASE_URL } from "./config";
 
 interface CalculationResponse {
     result: number;
@@ -49,7 +49,7 @@ function App() {
         setError("");
 
         try {
-            const response = await fetch("/api/calculate", {
+            const response = await fetch(`${API_BASE_URL}/api/calculate`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -87,6 +87,7 @@ function App() {
             `${API_BASE_URL}/api/run-network-stream`,
         );
 
+        console.log("Training stream URL:", eventSource.url);
         eventSource.onmessage = (event) => {
             const message = JSON.parse(event.data);
 
