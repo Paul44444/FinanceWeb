@@ -4,6 +4,7 @@ import NetworkCharts from "./NetworkCharts";
 
 import LiveLossChart from "./LiveLossChart";
 import type { LiveLossPoint } from "./LiveLossChart";
+import { API_BASE_URL } from "./config";
 
 interface CalculationResponse {
     result: number;
