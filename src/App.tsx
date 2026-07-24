@@ -191,7 +191,13 @@ function App() {
 
                 {(networkLoading || liveLossData.length > 0) && (
                     <section>
-                        <p>Training progress: {trainingProgress}%</p>
+                        <p>
+                            Training progress: {trainingProgress}%{" "}
+                            <span className="training-hint">
+                                (live updates normally arrive every few seconds; the first update can
+                                take longer while stock data is downloaded)
+                            </span>
+                        </p>
 
                         <progress
                             value={trainingProgress}

@@ -234,7 +234,7 @@ def train_loop(
         optimizer.step()
         optimizer.zero_grad()
 
-        if i % 1 == 0:  # batch%1==0:
+        if i % 100 == 0 or i == size - 1:  # batch%1==0:
             loss_val, current = loss.item(), batch * batch_size + len(X)
             print("\n loss: " + str(loss_val) + "; current: " + str(current) + "; size: " + str(size))
             losses.append(loss_val)
@@ -259,7 +259,7 @@ def train_loop(
 
         if progress_callback is not None:
             # Send every tenth step and always send the final step.
-            if i % 10 == 0 or i == size - 1:
+            if i % 2 == 0 or i == size - 1:
                 cash_value = cash_history[-1]
                 cash_linear_value = cash_history_linear[-1]
 
@@ -469,7 +469,8 @@ def find_training_data(input_len, ys_len, merge=-1, input_stock=None):
             xs = torch.FloatTensor(xs_raw)
             ys = torch.FloatTensor(ys_raw)
             train_els.update({xs: ys})
-            print("\n init data i: " + str(train_idx) + "/" + str(trains))
+            if train_idx % 100 == 0 or train_idx == trains - 1:
+                print(f"Preparing training data: {train_idx + 1}/{trains}")
 
     xs_raw = init_from_stock(0, input_len, 0.1 * (trains + 1), keys_l=keys, vals_l=vals)
     ys_raw = init_from_stock(input_len, input_len + ys_len, 0.1 * (trains + 1), keys_l=keys, vals_l=vals)
