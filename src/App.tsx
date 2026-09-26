@@ -12,7 +12,7 @@ interface CalculationResponse {
 
 interface NetworkResult {
     stock: string;
-    epochs: number;
+    iterations: number;
     losses: number[];
     losses_simple: number[];
     cash_history: number[];
@@ -33,12 +33,6 @@ function App() {
 
     const [trainingProgress, setTrainingProgress] =
         useState<number>(0);
-    const [trainingRound, setTrainingRound] =
-        useState<number>(0);
-    const [stepInRound, setStepInRound] =
-        useState<number>(0);
-    const [stepsPerRound, setStepsPerRound] =
-        useState<number>(0);
 
     const [networkResult, setNetworkResult] =
         useState<NetworkResult | null>(null);
@@ -46,7 +40,7 @@ function App() {
     const [networkLoading, setNetworkLoading] =
         useState<boolean>(false);
     const [trainingIterations, setTrainingIterations] =
-        useState<number>(5);
+        useState<number>(200);
     const API_BASE_URL =
         import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -89,13 +83,10 @@ function App() {
         setNetworkResult(null);
         setLiveLossData([]);
         setTrainingProgress(0);
-        setTrainingRound(0);
-        setStepInRound(0);
-        setStepsPerRound(0);
         setError("");
 
         const eventSource = new EventSource(
-            `${API_BASE_URL}/api/run-network-stream?epochs=${trainingIterations}`,
+            `${API_BASE_URL}/api/run-network-stream?iterations=${trainingIterations}`,
         );
 
         console.log("Training stream URL:", eventSource.url);
@@ -114,9 +105,6 @@ function App() {
                 setTrainingProgress(
                     Math.round((message.step / message.total) * 100),
                 );
-                setTrainingRound(message.epoch);
-                setStepInRound(message.step_in_epoch);
-                setStepsPerRound(message.steps_per_epoch);
             }
 
             if (message.type === "complete") {
@@ -194,15 +182,15 @@ function App() {
                 <h2>Stock neural network</h2>
 
                 <label className="training-iterations">
-                    Training rounds
+                    Training iterations
                     <input
                         type="number"
                         min="1"
-                        max="100"
+                        max="10000"
                         value={trainingIterations}
                         onChange={(event) =>
                             setTrainingIterations(
-                                Math.min(100, Math.max(1, Number(event.target.value))),
+                                Math.min(10000, Math.max(1, Number(event.target.value))),
                             )
                         }
                         disabled={networkLoading}
@@ -222,14 +210,9 @@ function App() {
                 {(networkLoading || liveLossData.length > 0) && (
                     <section>
                         <p>
-                            Training round: {trainingRound} of {trainingIterations}
-                            {stepsPerRound > 0 && (
-                                <> · data update: {stepInRound} of {stepsPerRound}</>
-                            )}
-                            {" "}({trainingProgress}%)
+                            Training progress: {trainingProgress}% · iteration: {liveLossData.at(-1)?.step ?? 0} of {trainingIterations}
                             <span className="training-hint">
-                                (the chart shows individual data updates; the first update can take
-                                longer while stock data is downloaded)
+                                (the chart stops after the selected number of iterations)
                             </span>
                         </p>
 

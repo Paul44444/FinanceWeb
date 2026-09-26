@@ -28,7 +28,7 @@ class CalculationInput(BaseModel):
 
 @app.get("/api/run-network-stream")
 def run_network_stream(
-    epochs: int = Query(default=5, ge=1, le=100),
+    iterations: int = Query(default=200, ge=1, le=10000),
 ):
     def event_stream():
         messages = Queue()
@@ -43,7 +43,7 @@ def run_network_stream(
             try:
                 result = net_1(
                     progress_callback=send_progress,
-                    epochs_to_train=epochs,
+                    training_steps=iterations,
                 )
 
                 messages.put({
@@ -102,9 +102,9 @@ def calculate(values: CalculationInput):
     }
 
 @app.post("/api/run-network")
-def run_network(epochs: int = Query(default=5, ge=1, le=100)):
+def run_network(iterations: int = Query(default=200, ge=1, le=10000)):
     try:
-        result = net_1(epochs_to_train=epochs)
+        result = net_1(training_steps=iterations)
 
         return {
             "success": True,

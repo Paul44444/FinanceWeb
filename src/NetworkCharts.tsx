@@ -11,7 +11,7 @@ import {
 
 interface NetworkResult {
     stock: string;
-    epochs: number;
+    iterations: number;
     losses: number[];
     losses_simple: number[];
     cash_history: number[];

@@ -184,15 +184,21 @@ def train_loop(
         fund=None,
         fund_linear=None,
         progress_callback=None,
-        epochs_to_train=1,
+        training_steps=200,
 ):
     """
 
     :return:
     """
 
-    steps_per_epoch = len(data)
-    stock_history = list(data.keys()) * epochs_to_train
+    available_stock_history = list(data.keys())
+    if not available_stock_history:
+        raise ValueError("No stock data is available for training.")
+
+    stock_history = [
+        available_stock_history[index % len(available_stock_history)]
+        for index in range(training_steps)
+    ]
 
     # size = len(dataloader.dataset)
     size = len(stock_history)
@@ -276,10 +282,6 @@ def train_loop(
                 progress_callback({
                     "step": i + 1,
                     "total": size,
-                    "epoch": (i // steps_per_epoch) + 1,
-                    "epochs": epochs_to_train,
-                    "step_in_epoch": (i % steps_per_epoch) + 1,
-                    "steps_per_epoch": steps_per_epoch,
                     "loss": float(loss.item()),
                     "loss_simple": float(
                         loss_simple.detach().cpu().item()
@@ -571,7 +573,7 @@ def self_correlate(stock):
 
     return prod1
 
-def net_1(progress_callback=None, epochs_to_train=epochs):
+def net_1(progress_callback=None, training_steps=200):
     # info (paul): params, network
     net1 = NeuralNetwork(input_len, output_len)
     loss_fn = nn.MSELoss()  # nn.CrossEntropyLoss()
@@ -616,14 +618,14 @@ def net_1(progress_callback=None, epochs_to_train=epochs):
         fund,
         fund_linear,
         progress_callback=progress_callback,
-        epochs_to_train=epochs_to_train,
+        training_steps=training_steps,
     )
 
     plt.close(fig1)
 
     return {
         "stock": stock_label,
-        "epochs": epochs_to_train,
+        "iterations": training_steps,
         **result,
     }
 
