@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import NetworkCharts from "./NetworkCharts";
+import ElectricityForecast from "./ElectricityForecast";
 
 import LiveLossChart from "./LiveLossChart";
 import type { LiveLossPoint } from "./LiveLossChart";
@@ -22,6 +23,7 @@ interface NetworkResult {
 }
 
 function App() {
+    const [activeView, setActiveView] = useState<"stocks" | "electricity">("electricity");
     const [x, setX] = useState<number>(5);
     const [y, setY] = useState<number>(7);
     const [result, setResult] = useState<number | null>(null);
@@ -159,6 +161,30 @@ function App() {
         <main className="app">
             <section className="calculator">
                 <h1>Python Finance Application</h1>
+                <nav className="experiment-tabs" aria-label="Finance experiments">
+                    <button
+                        type="button"
+                        className={activeView === "electricity" ? "active" : ""}
+                        onClick={() => setActiveView("electricity")}
+                    >
+                        Electricity forecast
+                    </button>
+                    <button
+                        type="button"
+                        className={activeView === "stocks" ? "active" : ""}
+                        onClick={() => setActiveView("stocks")}
+                    >
+                        Stock experiment
+                    </button>
+                </nav>
+
+                {activeView === "electricity" ? (
+                    <ElectricityForecast
+                        apiBaseUrl={apiBaseUrl}
+                        backendReady={backendReady}
+                    />
+                ) : (
+                <>
                 {SHOW_CALCULATOR && (<>
                 <p>
                     Enter two values. The calculation will be performed by the
@@ -278,6 +304,8 @@ function App() {
                 )}
 
                 {error && <div className="error">{error}</div>}
+                </>
+                )}
             </section>
         </main>
     );

@@ -9,6 +9,7 @@ from queue import Queue
 from fastapi.responses import StreamingResponse
 
 from backend.main import net_1
+from backend.electricity import train_electricity_forecast
 
 app = FastAPI()
 app.add_middleware(
@@ -25,6 +26,32 @@ app.add_middleware(
 class CalculationInput(BaseModel):
     x: float
     y: float
+
+
+class ElectricityTrainingInput(BaseModel):
+    lookback_days: int = 60
+    iterations: int = 800
+    forecast_hours: int = 48
+
+
+@app.post("/api/electricity/train")
+def train_electricity(values: ElectricityTrainingInput):
+    if not 21 <= values.lookback_days <= 365:
+        raise HTTPException(status_code=422, detail="lookback_days must be 21 to 365")
+    if not 50 <= values.iterations <= 5000:
+        raise HTTPException(status_code=422, detail="iterations must be 50 to 5000")
+    if not 12 <= values.forecast_hours <= 72:
+        raise HTTPException(status_code=422, detail="forecast_hours must be 12 to 72")
+    try:
+        return train_electricity_forecast(
+            values.lookback_days,
+            values.iterations,
+            values.forecast_hours,
+        )
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
 
 @app.get("/api/run-network-stream")
 def run_network_stream(
