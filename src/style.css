@@ -207,6 +207,61 @@ p {
   margin-top: 28px;
 }
 
+.trading-metrics {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin-top: 16px;
+}
+
+.positive,
+.sell-action {
+  color: #16a34a !important;
+}
+
+.negative,
+.buy-action {
+  color: #dc2626 !important;
+}
+
+.trade-table-wrap {
+  overflow-x: auto;
+  margin-top: 18px;
+}
+
+.trade-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.trade-table th,
+.trade-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.trade-table th:first-child,
+.trade-table td:first-child,
+.trade-table th:nth-child(2),
+.trade-table td:nth-child(2) {
+  text-align: left;
+}
+
+.planned-trades {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.planned-trades article {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--social-bg);
+  font-size: 14px;
+}
+
 @media (max-width: 760px) {
   .metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

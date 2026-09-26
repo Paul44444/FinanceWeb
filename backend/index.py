@@ -32,6 +32,9 @@ class ElectricityTrainingInput(BaseModel):
     lookback_days: int = 60
     iterations: int = 800
     forecast_hours: int = 48
+    starting_budget: float = 1000.0
+    storage_capacity_mwh: float = 1.0
+    round_trip_efficiency: float = 0.90
 
 
 @app.post("/api/electricity/train")
@@ -42,11 +45,20 @@ def train_electricity(values: ElectricityTrainingInput):
         raise HTTPException(status_code=422, detail="iterations must be 50 to 5000")
     if not 12 <= values.forecast_hours <= 72:
         raise HTTPException(status_code=422, detail="forecast_hours must be 12 to 72")
+    if not 100 <= values.starting_budget <= 1_000_000:
+        raise HTTPException(status_code=422, detail="starting_budget must be 100 to 1000000")
+    if not 0.01 <= values.storage_capacity_mwh <= 100:
+        raise HTTPException(status_code=422, detail="storage_capacity_mwh must be 0.01 to 100")
+    if not 0.5 <= values.round_trip_efficiency <= 1:
+        raise HTTPException(status_code=422, detail="round_trip_efficiency must be 0.5 to 1")
     try:
         return train_electricity_forecast(
             values.lookback_days,
             values.iterations,
             values.forecast_hours,
+            values.starting_budget,
+            values.storage_capacity_mwh,
+            values.round_trip_efficiency,
         )
     except RuntimeError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error

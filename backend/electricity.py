@@ -182,10 +182,145 @@ def _metrics(actual: np.ndarray, predicted: np.ndarray) -> dict[str, float]:
     return {"mae": mae, "rmse": rmse, "correlation": correlation}
 
 
+def _best_daily_cycles(points: list[dict], efficiency: float) -> list[dict]:
+    leg_efficiency = math.sqrt(efficiency)
+    cycles = []
+    for start in range(0, len(points), 24):
+        day = points[start : start + 24]
+        best = None
+        for buy_index in range(len(day) - 1):
+            for sell_index in range(buy_index + 1, len(day)):
+                expected_margin = (
+                    day[sell_index]["predicted"] * leg_efficiency
+                    - day[buy_index]["predicted"] / leg_efficiency
+                    - 2.0
+                )
+                if best is None or expected_margin > best["expectedMargin"]:
+                    best = {
+                        "buyIndex": start + buy_index,
+                        "sellIndex": start + sell_index,
+                        "expectedMargin": expected_margin,
+                    }
+        if best is not None and best["expectedMargin"] > 0:
+            cycles.append(best)
+    return cycles
+
+
+def _simulate_battery_policy(
+    validation: list[dict],
+    starting_budget: float,
+    capacity_mwh: float,
+    efficiency: float,
+) -> dict:
+    transaction_cost = 1.0
+    leg_efficiency = math.sqrt(efficiency)
+    cycles = _best_daily_cycles(validation, efficiency)
+    actions = {}
+    for cycle_index, cycle in enumerate(cycles):
+        actions[cycle["buyIndex"]] = ("buy", cycle_index)
+        actions[cycle["sellIndex"]] = ("sell", cycle_index)
+
+    cash = starting_budget
+    stored_energy = 0.0
+    purchase_cost = 0.0
+    trades = []
+    completed_cycles = []
+    equity_curve = []
+
+    for index, point in enumerate(validation):
+        action = actions.get(index)
+        if action and action[0] == "buy" and stored_energy == 0:
+            cost_per_mwh = point["actual"] / leg_efficiency + transaction_cost
+            affordable = capacity_mwh
+            if cost_per_mwh > 0:
+                affordable = min(capacity_mwh, cash / cost_per_mwh)
+            stored_energy = max(0.0, affordable)
+            purchase_cost = stored_energy * cost_per_mwh
+            cash -= purchase_cost
+            trades.append(
+                {
+                    "time": point["time"],
+                    "action": "BUY",
+                    "marketPrice": point["actual"],
+                    "predictedPrice": point["predicted"],
+                    "energyMWh": stored_energy,
+                    "cashAfter": cash,
+                }
+            )
+        elif action and action[0] == "sell" and stored_energy > 0:
+            revenue = stored_energy * (
+                point["actual"] * leg_efficiency - transaction_cost
+            )
+            cash += revenue
+            cycle_profit = revenue - purchase_cost
+            completed_cycles.append(cycle_profit)
+            trades.append(
+                {
+                    "time": point["time"],
+                    "action": "SELL",
+                    "marketPrice": point["actual"],
+                    "predictedPrice": point["predicted"],
+                    "energyMWh": stored_energy,
+                    "cashAfter": cash,
+                    "cycleProfit": cycle_profit,
+                }
+            )
+            stored_energy = 0.0
+            purchase_cost = 0.0
+
+        marked_value = stored_energy * point["actual"] * leg_efficiency
+        equity_curve.append({"time": point["time"], "equity": cash + marked_value})
+
+    equity_values = [point["equity"] for point in equity_curve]
+    peak = equity_values[0] if equity_values else starting_budget
+    max_drawdown = 0.0
+    for equity in equity_values:
+        peak = max(peak, equity)
+        if peak > 0:
+            max_drawdown = max(max_drawdown, (peak - equity) / peak * 100)
+
+    profit = cash - starting_budget
+    return {
+        "startingBudget": starting_budget,
+        "finalCapital": cash,
+        "profit": profit,
+        "returnPercent": profit / starting_budget * 100,
+        "capacityMWh": capacity_mwh,
+        "roundTripEfficiency": efficiency,
+        "transactionCostPerMWh": transaction_cost,
+        "completedCycles": len(completed_cycles),
+        "winningCycles": sum(value > 0 for value in completed_cycles),
+        "maxDrawdownPercent": max_drawdown,
+        "trades": trades,
+        "equityCurve": equity_curve,
+    }
+
+
+def _future_policy_plan(
+    forecast: list[dict],
+    capacity_mwh: float,
+    efficiency: float,
+) -> list[dict]:
+    cycles = _best_daily_cycles(forecast, efficiency)
+    return [
+        {
+            "buyTime": forecast[cycle["buyIndex"]]["time"],
+            "sellTime": forecast[cycle["sellIndex"]]["time"],
+            "predictedBuyPrice": forecast[cycle["buyIndex"]]["predicted"],
+            "predictedSellPrice": forecast[cycle["sellIndex"]]["predicted"],
+            "expectedProfit": cycle["expectedMargin"] * capacity_mwh,
+        }
+        for cycle in cycles
+    ]
+
+
 def train_electricity_forecast(
     lookback_days: int,
     iterations: int,
     forecast_hours: int,
+    starting_budget: float = 1000.0,
+    capacity_mwh: float = 1.0,
+    efficiency: float = 0.90,
 ) -> dict:
     if not _training_lock.acquire(blocking=False):
         raise RuntimeError("An electricity-price model is already training.")
@@ -303,6 +438,12 @@ def train_electricity_forecast(
             }
             for index, sample in enumerate(validation_samples)
         ]
+        trading_simulation = _simulate_battery_policy(
+            validation,
+            starting_budget,
+            capacity_mwh,
+            efficiency,
+        )
 
         forecast_weather = _fetch_forecast_weather(
             max(3, math.ceil(forecast_hours / 24) + 1)
@@ -367,6 +508,12 @@ def train_electricity_forecast(
             "validation": validation,
             "forecast": forecast,
             "lossHistory": loss_history,
+            "trading": trading_simulation,
+            "plannedTrades": _future_policy_plan(
+                forecast,
+                capacity_mwh,
+                efficiency,
+            ),
             "locations": list(GERMANY_LOCATIONS.keys()),
             "sources": [
                 "Bundesnetzagentur | SMARD.de",

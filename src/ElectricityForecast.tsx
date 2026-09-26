@@ -36,6 +36,35 @@ interface ElectricityResult {
     forecast: ForecastPoint[];
     lossHistory: { iteration: number; loss: number }[];
     locations: string[];
+    trading: {
+        startingBudget: number;
+        finalCapital: number;
+        profit: number;
+        returnPercent: number;
+        capacityMWh: number;
+        roundTripEfficiency: number;
+        transactionCostPerMWh: number;
+        completedCycles: number;
+        winningCycles: number;
+        maxDrawdownPercent: number;
+        trades: {
+            time: string;
+            action: "BUY" | "SELL";
+            marketPrice: number;
+            predictedPrice: number;
+            energyMWh: number;
+            cashAfter: number;
+            cycleProfit?: number;
+        }[];
+        equityCurve: { time: string; equity: number }[];
+    };
+    plannedTrades: {
+        buyTime: string;
+        sellTime: string;
+        predictedBuyPrice: number;
+        predictedSellPrice: number;
+        expectedProfit: number;
+    }[];
 }
 
 interface ElectricityForecastProps {
@@ -55,6 +84,9 @@ function ElectricityForecast({ apiBaseUrl, backendReady }: ElectricityForecastPr
     const [lookbackDays, setLookbackDays] = useState(60);
     const [iterations, setIterations] = useState(800);
     const [forecastHours, setForecastHours] = useState(48);
+    const [startingBudget, setStartingBudget] = useState(1000);
+    const [storageCapacity, setStorageCapacity] = useState(1);
+    const [efficiencyPercent, setEfficiencyPercent] = useState(90);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const [result, setResult] = useState<ElectricityResult | null>(null);
@@ -70,6 +102,9 @@ function ElectricityForecast({ apiBaseUrl, backendReady }: ElectricityForecastPr
                     lookback_days: lookbackDays,
                     iterations,
                     forecast_hours: forecastHours,
+                    starting_budget: startingBudget,
+                    storage_capacity_mwh: storageCapacity,
+                    round_trip_efficiency: efficiencyPercent / 100,
                 }),
             });
             const payload = await response.json();
@@ -130,6 +165,40 @@ function ElectricityForecast({ apiBaseUrl, backendReady }: ElectricityForecastPr
                         max="72"
                         value={forecastHours}
                         onChange={(event) => setForecastHours(Number(event.target.value))}
+                        disabled={loading}
+                    />
+                </label>
+                <label>
+                    Simulated budget (€)
+                    <input
+                        type="number"
+                        min="100"
+                        max="1000000"
+                        value={startingBudget}
+                        onChange={(event) => setStartingBudget(Number(event.target.value))}
+                        disabled={loading}
+                    />
+                </label>
+                <label>
+                    Storage capacity (MWh)
+                    <input
+                        type="number"
+                        min="0.01"
+                        max="100"
+                        step="0.01"
+                        value={storageCapacity}
+                        onChange={(event) => setStorageCapacity(Number(event.target.value))}
+                        disabled={loading}
+                    />
+                </label>
+                <label>
+                    Round-trip efficiency (%)
+                    <input
+                        type="number"
+                        min="50"
+                        max="100"
+                        value={efficiencyPercent}
+                        onChange={(event) => setEfficiencyPercent(Number(event.target.value))}
                         disabled={loading}
                     />
                 </label>
@@ -233,6 +302,83 @@ function ElectricityForecast({ apiBaseUrl, backendReady }: ElectricityForecastPr
                             </LineChart>
                         </ResponsiveContainer>
                     </div>
+
+                    <h3>Simulated battery trading policy</h3>
+                    <p className="chart-note">
+                        Simulation only. Each day the policy selects one forecast-based
+                        charge/discharge cycle and settles it against held-out market prices.
+                    </p>
+                    <div className="metric-grid trading-metrics">
+                        <article>
+                            <span>Final simulated capital</span>
+                            <strong>{result.trading.finalCapital.toFixed(2)} €</strong>
+                        </article>
+                        <article>
+                            <span>Profit</span>
+                            <strong className={result.trading.profit >= 0 ? "positive" : "negative"}>
+                                {result.trading.profit >= 0 ? "+" : ""}{result.trading.profit.toFixed(2)} €
+                            </strong>
+                        </article>
+                        <article>
+                            <span>Return</span>
+                            <strong>{result.trading.returnPercent.toFixed(2)}%</strong>
+                        </article>
+                        <article>
+                            <span>Winning cycles</span>
+                            <strong>{result.trading.winningCycles} / {result.trading.completedCycles}</strong>
+                        </article>
+                        <article>
+                            <span>Maximum drawdown</span>
+                            <strong>{result.trading.maxDrawdownPercent.toFixed(2)}%</strong>
+                        </article>
+                    </div>
+
+                    <div className="chart-container electricity-chart compact-chart">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <LineChart data={result.trading.equityCurve}>
+                                <CartesianGrid strokeDasharray="3 3" />
+                                <XAxis dataKey="time" tickFormatter={formatTime} minTickGap={45} />
+                                <YAxis unit=" €" domain={["auto", "auto"]} />
+                                <Tooltip labelFormatter={(value) => formatTime(String(value))} />
+                                <Line dataKey="equity" name="Simulated equity" stroke="#0891b2" dot={false} strokeWidth={2} />
+                            </LineChart>
+                        </ResponsiveContainer>
+                    </div>
+
+                    <div className="trade-table-wrap">
+                        <table className="trade-table">
+                            <thead>
+                                <tr><th>Time</th><th>Action</th><th>Market</th><th>Forecast</th><th>Energy</th><th>Cash after</th></tr>
+                            </thead>
+                            <tbody>
+                                {result.trading.trades.map((trade, index) => (
+                                    <tr key={`${trade.time}-${trade.action}-${index}`}>
+                                        <td>{formatTime(trade.time)}</td>
+                                        <td className={trade.action === "BUY" ? "buy-action" : "sell-action"}>{trade.action}</td>
+                                        <td>{trade.marketPrice.toFixed(2)} €/MWh</td>
+                                        <td>{trade.predictedPrice.toFixed(2)} €/MWh</td>
+                                        <td>{trade.energyMWh.toFixed(3)} MWh</td>
+                                        <td>{trade.cashAfter.toFixed(2)} €</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    {result.plannedTrades.length > 0 && (
+                        <>
+                            <h3>Next simulated forecast plan</h3>
+                            <div className="planned-trades">
+                                {result.plannedTrades.map((trade) => (
+                                    <article key={`${trade.buyTime}-${trade.sellTime}`}>
+                                        Buy {formatTime(trade.buyTime)} at predicted {trade.predictedBuyPrice.toFixed(2)} €/MWh,
+                                        sell {formatTime(trade.sellTime)} at predicted {trade.predictedSellPrice.toFixed(2)} €/MWh.
+                                        Expected simulated margin: {trade.expectedProfit.toFixed(2)} €.
+                                    </article>
+                                ))}
+                            </div>
+                        </>
+                    )}
 
                     <p className="data-attribution">
                         Price data: Bundesnetzagentur | SMARD.de (CC BY 4.0).
