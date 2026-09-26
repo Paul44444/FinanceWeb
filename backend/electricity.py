@@ -14,6 +14,7 @@ from torch import nn
 
 SMARD_BASE = "https://www.smard.de/app/chart_data/4169/DE-LU"
 ARCHIVE_WEATHER_URL = "https://archive-api.open-meteo.com/v1/archive"
+PREVIOUS_RUNS_WEATHER_URL = "https://previous-runs-api.open-meteo.com/v1/forecast"
 FORECAST_WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
 WEATHER_VARIABLES = (
     "temperature_2m,wind_speed_100m,shortwave_radiation,cloud_cover"
@@ -130,6 +131,41 @@ def _fetch_historical_weather(
     return _average_weather(payload)
 
 
+def _fetch_day_ahead_weather(
+    start: datetime,
+    end: datetime,
+) -> dict[int, dict[str, float]]:
+    """Weather values that were available 24 hours before each delivery hour."""
+    variables = [
+        f"{name}_previous_day1" for name in WEATHER_VARIABLES.split(",")
+    ]
+    params = _weather_params(start.date().isoformat(), end.date().isoformat())
+    params["hourly"] = ",".join(variables)
+    payload = _fetch_json(PREVIOUS_RUNS_WEATHER_URL, params)
+    locations = payload if isinstance(payload, list) else [payload]
+    combined: dict[int, dict[str, list[float]]] = {}
+    for location in locations:
+        hourly = location["hourly"]
+        for index, time_value in enumerate(hourly["time"]):
+            timestamp = _iso_to_ms(time_value)
+            bucket = combined.setdefault(
+                timestamp,
+                {name: [] for name in WEATHER_VARIABLES.split(",")},
+            )
+            for base_name, api_name in zip(bucket, variables):
+                value = hourly[api_name][index]
+                if value is not None:
+                    bucket[base_name].append(float(value))
+    return {
+        timestamp: {
+            name: float(np.mean(values)) if values else 0.0
+            for name, values in weather.items()
+        }
+        for timestamp, weather in combined.items()
+        if all(weather[name] for name in weather)
+    }
+
+
 def _fetch_forecast_weather(forecast_days: int) -> dict[int, dict[str, float]]:
     start = datetime.now(timezone.utc).date() - timedelta(days=1)
     end = start + timedelta(days=forecast_days + 1)
@@ -182,7 +218,67 @@ def _metrics(actual: np.ndarray, predicted: np.ndarray) -> dict[str, float]:
     return {"mae": mae, "rmse": rmse, "correlation": correlation}
 
 
-def _best_daily_cycles(points: list[dict], efficiency: float) -> list[dict]:
+def _fit_model(
+    samples: list[tuple[int, list[float], float]],
+    iterations: int,
+    seed: int,
+) -> tuple[ElectricityPriceNetwork, np.ndarray, np.ndarray, float, float, list[dict]]:
+    torch.manual_seed(seed)
+    x_values = np.asarray([sample[1] for sample in samples], dtype=np.float32)
+    y_values = np.asarray(
+        [sample[2] for sample in samples], dtype=np.float32
+    ).reshape(-1, 1)
+    x_mean = x_values.mean(axis=0)
+    x_scale = x_values.std(axis=0)
+    x_scale[x_scale < 1e-6] = 1.0
+    y_mean = float(y_values.mean())
+    y_scale = float(y_values.std()) or 1.0
+    x_train = torch.tensor((x_values - x_mean) / x_scale)
+    y_train = torch.tensor((y_values - y_mean) / y_scale)
+    model = ElectricityPriceNetwork(x_train.shape[1])
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.006)
+    loss_function = nn.SmoothL1Loss()
+    loss_history = []
+    report_every = max(1, iterations // 120)
+    model.train()
+    for iteration in range(1, iterations + 1):
+        optimizer.zero_grad()
+        loss = loss_function(model(x_train), y_train)
+        loss.backward()
+        optimizer.step()
+        if iteration == 1 or iteration % report_every == 0 or iteration == iterations:
+            loss_history.append(
+                {"iteration": iteration, "loss": float(loss.detach().item())}
+            )
+    model.eval()
+    return model, x_mean, x_scale, y_mean, y_scale, loss_history
+
+
+def _predict_samples(
+    model: ElectricityPriceNetwork,
+    samples: list[tuple[int, list[float], float]],
+    x_mean: np.ndarray,
+    x_scale: np.ndarray,
+    y_mean: float,
+    y_scale: float,
+) -> np.ndarray:
+    values = np.asarray([sample[1] for sample in samples], dtype=np.float32)
+    with torch.no_grad():
+        return (
+            model(torch.tensor((values - x_mean) / x_scale))
+            .numpy()
+            .reshape(-1)
+            * y_scale
+            + y_mean
+        )
+
+
+def _best_daily_cycles(
+    points: list[dict],
+    efficiency: float,
+    price_key: str,
+    variable_cost_per_mwh: float,
+) -> list[dict]:
     leg_efficiency = math.sqrt(efficiency)
     cycles = []
     for start in range(0, len(points), 24):
@@ -191,9 +287,9 @@ def _best_daily_cycles(points: list[dict], efficiency: float) -> list[dict]:
         for buy_index in range(len(day) - 1):
             for sell_index in range(buy_index + 1, len(day)):
                 expected_margin = (
-                    day[sell_index]["predicted"] * leg_efficiency
-                    - day[buy_index]["predicted"] / leg_efficiency
-                    - 2.0
+                    day[sell_index][price_key] * leg_efficiency
+                    - day[buy_index][price_key] / leg_efficiency
+                    - 2 * variable_cost_per_mwh
                 )
                 if best is None or expected_margin > best["expectedMargin"]:
                     best = {
@@ -211,16 +307,25 @@ def _simulate_battery_policy(
     starting_budget: float,
     capacity_mwh: float,
     efficiency: float,
+    power_mw: float,
+    battery_cost_per_kwh: float,
+    market_fee_per_mwh: float,
+    degradation_cost_per_mwh: float,
+    self_discharge_percent_per_day: float,
+    price_key: str = "predicted",
+    name: str = "Model policy",
 ) -> dict:
-    transaction_cost = 1.0
+    variable_cost = market_fee_per_mwh + degradation_cost_per_mwh / 2
     leg_efficiency = math.sqrt(efficiency)
-    cycles = _best_daily_cycles(validation, efficiency)
+    cycles = _best_daily_cycles(validation, efficiency, price_key, variable_cost)
     actions = {}
     for cycle_index, cycle in enumerate(cycles):
         actions[cycle["buyIndex"]] = ("buy", cycle_index)
         actions[cycle["sellIndex"]] = ("sell", cycle_index)
 
     cash = starting_budget
+    battery_value = capacity_mwh * 1000 * battery_cost_per_kwh
+    invested_capital = starting_budget + battery_value
     stored_energy = 0.0
     purchase_cost = 0.0
     trades = []
@@ -230,10 +335,10 @@ def _simulate_battery_policy(
     for index, point in enumerate(validation):
         action = actions.get(index)
         if action and action[0] == "buy" and stored_energy == 0:
-            cost_per_mwh = point["actual"] / leg_efficiency + transaction_cost
-            affordable = capacity_mwh
+            cost_per_mwh = point["actual"] / leg_efficiency + variable_cost
+            affordable = min(capacity_mwh, power_mw)
             if cost_per_mwh > 0:
-                affordable = min(capacity_mwh, cash / cost_per_mwh)
+                affordable = min(capacity_mwh, power_mw, cash / cost_per_mwh)
             stored_energy = max(0.0, affordable)
             purchase_cost = stored_energy * cost_per_mwh
             cash -= purchase_cost
@@ -248,8 +353,13 @@ def _simulate_battery_policy(
                 }
             )
         elif action and action[0] == "sell" and stored_energy > 0:
-            revenue = stored_energy * (
-                point["actual"] * leg_efficiency - transaction_cost
+            cycle = cycles[action[1]]
+            elapsed_hours = max(1, cycle["sellIndex"] - cycle["buyIndex"])
+            retained_energy = stored_energy * (
+                1 - self_discharge_percent_per_day / 100
+            ) ** (elapsed_hours / 24)
+            revenue = retained_energy * (
+                point["actual"] * leg_efficiency - variable_cost
             )
             cash += revenue
             cycle_profit = revenue - purchase_cost
@@ -260,7 +370,7 @@ def _simulate_battery_policy(
                     "action": "SELL",
                     "marketPrice": point["actual"],
                     "predictedPrice": point["predicted"],
-                    "energyMWh": stored_energy,
+                    "energyMWh": retained_energy,
                     "cashAfter": cash,
                     "cycleProfit": cycle_profit,
                 }
@@ -269,10 +379,12 @@ def _simulate_battery_policy(
             purchase_cost = 0.0
 
         marked_value = stored_energy * point["actual"] * leg_efficiency
-        equity_curve.append({"time": point["time"], "equity": cash + marked_value})
+        equity_curve.append(
+            {"time": point["time"], "equity": cash + battery_value + marked_value}
+        )
 
     equity_values = [point["equity"] for point in equity_curve]
-    peak = equity_values[0] if equity_values else starting_budget
+    peak = equity_values[0] if equity_values else invested_capital
     max_drawdown = 0.0
     for equity in equity_values:
         peak = max(peak, equity)
@@ -281,13 +393,20 @@ def _simulate_battery_policy(
 
     profit = cash - starting_budget
     return {
+        "name": name,
         "startingBudget": starting_budget,
-        "finalCapital": cash,
+        "batteryInvestment": battery_value,
+        "investedCapital": invested_capital,
+        "finalCapital": invested_capital + profit,
+        "finalCash": cash,
         "profit": profit,
-        "returnPercent": profit / starting_budget * 100,
+        "returnPercent": profit / invested_capital * 100,
         "capacityMWh": capacity_mwh,
+        "powerMW": power_mw,
         "roundTripEfficiency": efficiency,
-        "transactionCostPerMWh": transaction_cost,
+        "marketFeePerMWh": market_fee_per_mwh,
+        "degradationCostPerMWh": degradation_cost_per_mwh,
+        "selfDischargePercentPerDay": self_discharge_percent_per_day,
         "completedCycles": len(completed_cycles),
         "winningCycles": sum(value > 0 for value in completed_cycles),
         "maxDrawdownPercent": max_drawdown,
@@ -300,15 +419,21 @@ def _future_policy_plan(
     forecast: list[dict],
     capacity_mwh: float,
     efficiency: float,
+    power_mw: float,
+    market_fee_per_mwh: float,
+    degradation_cost_per_mwh: float,
 ) -> list[dict]:
-    cycles = _best_daily_cycles(forecast, efficiency)
+    variable_cost = market_fee_per_mwh + degradation_cost_per_mwh / 2
+    cycles = _best_daily_cycles(
+        forecast, efficiency, "predicted", variable_cost
+    )
     return [
         {
             "buyTime": forecast[cycle["buyIndex"]]["time"],
             "sellTime": forecast[cycle["sellIndex"]]["time"],
             "predictedBuyPrice": forecast[cycle["buyIndex"]]["predicted"],
             "predictedSellPrice": forecast[cycle["sellIndex"]]["predicted"],
-            "expectedProfit": cycle["expectedMargin"] * capacity_mwh,
+            "expectedProfit": cycle["expectedMargin"] * min(capacity_mwh, power_mw),
         }
         for cycle in cycles
     ]
@@ -321,6 +446,11 @@ def train_electricity_forecast(
     starting_budget: float = 1000.0,
     capacity_mwh: float = 1.0,
     efficiency: float = 0.90,
+    power_mw: float = 0.5,
+    battery_cost_per_kwh: float = 400.0,
+    market_fee_per_mwh: float = 3.0,
+    degradation_cost_per_mwh: float = 20.0,
+    self_discharge_percent_per_day: float = 0.2,
 ) -> dict:
     if not _training_lock.acquire(blocking=False):
         raise RuntimeError("An electricity-price model is already training.")
@@ -338,7 +468,7 @@ def train_electricity_forecast(
         historical_start = historical_end - timedelta(days=lookback_days + 8)
 
         prices = _fetch_smard_prices(lookback_days)
-        historical_weather = _fetch_historical_weather(
+        historical_weather = _fetch_day_ahead_weather(
             historical_start,
             historical_end,
         )
@@ -376,53 +506,30 @@ def train_electricity_forecast(
         training_samples = samples[:-validation_size]
         validation_samples = samples[-validation_size:]
 
-        x_train_np = np.asarray(
-            [sample[1] for sample in training_samples], dtype=np.float32
-        )
-        y_train_np = np.asarray(
-            [sample[2] for sample in training_samples], dtype=np.float32
-        ).reshape(-1, 1)
-        x_validation_np = np.asarray(
-            [sample[1] for sample in validation_samples], dtype=np.float32
-        )
-        y_validation_np = np.asarray(
-            [sample[2] for sample in validation_samples], dtype=np.float32
-        ).reshape(-1, 1)
-
-        x_mean = x_train_np.mean(axis=0)
-        x_scale = x_train_np.std(axis=0)
-        x_scale[x_scale < 1e-6] = 1.0
-        y_mean = float(y_train_np.mean())
-        y_scale = float(y_train_np.std()) or 1.0
-
-        x_train = torch.tensor((x_train_np - x_mean) / x_scale)
-        y_train = torch.tensor((y_train_np - y_mean) / y_scale)
-        x_validation = torch.tensor((x_validation_np - x_mean) / x_scale)
-
-        model = ElectricityPriceNetwork(x_train.shape[1])
-        optimizer = torch.optim.Adam(model.parameters(), lr=0.006)
-        loss_function = nn.SmoothL1Loss()
-        loss_history = []
-        report_every = max(1, iterations // 120)
-
-        model.train()
-        for iteration in range(1, iterations + 1):
-            optimizer.zero_grad()
-            loss = loss_function(model(x_train), y_train)
-            loss.backward()
-            optimizer.step()
-            if iteration == 1 or iteration % report_every == 0 or iteration == iterations:
-                loss_history.append(
-                    {"iteration": iteration, "loss": float(loss.detach().item())}
-                )
-
-        model.eval()
-        with torch.no_grad():
-            validation_prediction = (
-                model(x_validation).numpy().reshape(-1) * y_scale + y_mean
+        # Expanding-window walk-forward validation. For every 24-hour block the
+        # model is rebuilt using only observations strictly before that block.
+        validation_predictions: list[float] = []
+        for offset in range(0, len(validation_samples), 24):
+            fold_training = training_samples + validation_samples[:offset]
+            fold_validation = validation_samples[offset : offset + 24]
+            fold_model, fold_x_mean, fold_x_scale, fold_y_mean, fold_y_scale, _ = (
+                _fit_model(fold_training, iterations, 42 + offset)
+            )
+            validation_predictions.extend(
+                _predict_samples(
+                    fold_model,
+                    fold_validation,
+                    fold_x_mean,
+                    fold_x_scale,
+                    fold_y_mean,
+                    fold_y_scale,
+                ).tolist()
             )
 
-        validation_actual = y_validation_np.reshape(-1)
+        validation_prediction = np.asarray(validation_predictions)
+        validation_actual = np.asarray(
+            [sample[2] for sample in validation_samples], dtype=np.float32
+        )
         validation_metrics = _metrics(validation_actual, validation_prediction)
         baseline_prediction = np.asarray(
             [prices[sample[0] - 24 * hour_ms] for sample in validation_samples]
@@ -438,11 +545,36 @@ def train_electricity_forecast(
             }
             for index, sample in enumerate(validation_samples)
         ]
-        trading_simulation = _simulate_battery_policy(
+        simulation_args = (
             validation,
             starting_budget,
             capacity_mwh,
             efficiency,
+            power_mw,
+            battery_cost_per_kwh,
+            market_fee_per_mwh,
+            degradation_cost_per_mwh,
+            self_discharge_percent_per_day,
+        )
+        trading_simulation = _simulate_battery_policy(*simulation_args)
+        comparison_policies = [
+            trading_simulation,
+            _simulate_battery_policy(
+                *simulation_args,
+                price_key="baseline",
+                name="24 h naive policy",
+            ),
+            _simulate_battery_policy(
+                *simulation_args,
+                price_key="actual",
+                name="Perfect foresight ceiling",
+            ),
+        ]
+
+        # The production model can use all known observations because it only
+        # predicts hours after the historical cutoff.
+        model, x_mean, x_scale, y_mean, y_scale, loss_history = _fit_model(
+            samples, iterations, 2026
         )
 
         forecast_weather = _fetch_forecast_weather(
@@ -509,10 +641,16 @@ def train_electricity_forecast(
             "forecast": forecast,
             "lossHistory": loss_history,
             "trading": trading_simulation,
+            "policyComparison": comparison_policies,
+            "validationMethod": "Daily expanding-window walk-forward",
+            "weatherDataMethod": "Archived weather forecast issued 24 hours earlier",
             "plannedTrades": _future_policy_plan(
                 forecast,
                 capacity_mwh,
                 efficiency,
+                power_mw,
+                market_fee_per_mwh,
+                degradation_cost_per_mwh,
             ),
             "locations": list(GERMANY_LOCATIONS.keys()),
             "sources": [

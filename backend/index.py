@@ -35,6 +35,11 @@ class ElectricityTrainingInput(BaseModel):
     starting_budget: float = 1000.0
     storage_capacity_mwh: float = 1.0
     round_trip_efficiency: float = 0.90
+    charge_power_mw: float = 0.5
+    battery_cost_per_kwh: float = 400.0
+    market_fee_per_mwh: float = 3.0
+    degradation_cost_per_mwh: float = 20.0
+    self_discharge_percent_per_day: float = 0.2
 
 
 @app.post("/api/electricity/train")
@@ -51,6 +56,16 @@ def train_electricity(values: ElectricityTrainingInput):
         raise HTTPException(status_code=422, detail="storage_capacity_mwh must be 0.01 to 100")
     if not 0.5 <= values.round_trip_efficiency <= 1:
         raise HTTPException(status_code=422, detail="round_trip_efficiency must be 0.5 to 1")
+    if not 0.01 <= values.charge_power_mw <= 100:
+        raise HTTPException(status_code=422, detail="charge_power_mw must be 0.01 to 100")
+    if not 0 <= values.battery_cost_per_kwh <= 5000:
+        raise HTTPException(status_code=422, detail="battery_cost_per_kwh must be 0 to 5000")
+    if not 0 <= values.market_fee_per_mwh <= 500:
+        raise HTTPException(status_code=422, detail="market_fee_per_mwh must be 0 to 500")
+    if not 0 <= values.degradation_cost_per_mwh <= 1000:
+        raise HTTPException(status_code=422, detail="degradation_cost_per_mwh must be 0 to 1000")
+    if not 0 <= values.self_discharge_percent_per_day <= 20:
+        raise HTTPException(status_code=422, detail="self_discharge_percent_per_day must be 0 to 20")
     try:
         return train_electricity_forecast(
             values.lookback_days,
@@ -59,6 +74,11 @@ def train_electricity(values: ElectricityTrainingInput):
             values.starting_budget,
             values.storage_capacity_mwh,
             values.round_trip_efficiency,
+            values.charge_power_mw,
+            values.battery_cost_per_kwh,
+            values.market_fee_per_mwh,
+            values.degradation_cost_per_mwh,
+            values.self_discharge_percent_per_day,
         )
     except RuntimeError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error

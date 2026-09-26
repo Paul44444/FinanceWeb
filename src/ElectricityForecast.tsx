@@ -36,14 +36,23 @@ interface ElectricityResult {
     forecast: ForecastPoint[];
     lossHistory: { iteration: number; loss: number }[];
     locations: string[];
+    validationMethod: string;
+    weatherDataMethod: string;
     trading: {
+        name: string;
         startingBudget: number;
+        batteryInvestment: number;
+        investedCapital: number;
         finalCapital: number;
+        finalCash: number;
         profit: number;
         returnPercent: number;
         capacityMWh: number;
         roundTripEfficiency: number;
-        transactionCostPerMWh: number;
+        powerMW: number;
+        marketFeePerMWh: number;
+        degradationCostPerMWh: number;
+        selfDischargePercentPerDay: number;
         completedCycles: number;
         winningCycles: number;
         maxDrawdownPercent: number;
@@ -58,6 +67,13 @@ interface ElectricityResult {
         }[];
         equityCurve: { time: string; equity: number }[];
     };
+    policyComparison: {
+        name: string;
+        profit: number;
+        returnPercent: number;
+        completedCycles: number;
+        winningCycles: number;
+    }[];
     plannedTrades: {
         buyTime: string;
         sellTime: string;
@@ -87,6 +103,11 @@ function ElectricityForecast({ apiBaseUrl, backendReady }: ElectricityForecastPr
     const [startingBudget, setStartingBudget] = useState(1000);
     const [storageCapacity, setStorageCapacity] = useState(1);
     const [efficiencyPercent, setEfficiencyPercent] = useState(90);
+    const [chargePower, setChargePower] = useState(0.5);
+    const [batteryCost, setBatteryCost] = useState(400);
+    const [marketFee, setMarketFee] = useState(3);
+    const [degradationCost, setDegradationCost] = useState(20);
+    const [selfDischarge, setSelfDischarge] = useState(0.2);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const [result, setResult] = useState<ElectricityResult | null>(null);
@@ -105,6 +126,11 @@ function ElectricityForecast({ apiBaseUrl, backendReady }: ElectricityForecastPr
                     starting_budget: startingBudget,
                     storage_capacity_mwh: storageCapacity,
                     round_trip_efficiency: efficiencyPercent / 100,
+                    charge_power_mw: chargePower,
+                    battery_cost_per_kwh: batteryCost,
+                    market_fee_per_mwh: marketFee,
+                    degradation_cost_per_mwh: degradationCost,
+                    self_discharge_percent_per_day: selfDischarge,
                 }),
             });
             const payload = await response.json();
@@ -202,6 +228,31 @@ function ElectricityForecast({ apiBaseUrl, backendReady }: ElectricityForecastPr
                         disabled={loading}
                     />
                 </label>
+                <label>
+                    Charge/discharge power (MW)
+                    <input type="number" min="0.01" max="100" step="0.01" value={chargePower}
+                        onChange={(event) => setChargePower(Number(event.target.value))} disabled={loading} />
+                </label>
+                <label>
+                    Battery investment (€/kWh)
+                    <input type="number" min="0" max="5000" step="10" value={batteryCost}
+                        onChange={(event) => setBatteryCost(Number(event.target.value))} disabled={loading} />
+                </label>
+                <label>
+                    Market/grid fee (€/MWh/leg)
+                    <input type="number" min="0" max="500" step="0.5" value={marketFee}
+                        onChange={(event) => setMarketFee(Number(event.target.value))} disabled={loading} />
+                </label>
+                <label>
+                    Battery wear (€/MWh cycle)
+                    <input type="number" min="0" max="1000" step="1" value={degradationCost}
+                        onChange={(event) => setDegradationCost(Number(event.target.value))} disabled={loading} />
+                </label>
+                <label>
+                    Self-discharge (%/day)
+                    <input type="number" min="0" max="20" step="0.1" value={selfDischarge}
+                        onChange={(event) => setSelfDischarge(Number(event.target.value))} disabled={loading} />
+                </label>
                 <button
                     type="button"
                     onClick={trainModel}
@@ -240,8 +291,10 @@ function ElectricityForecast({ apiBaseUrl, backendReady }: ElectricityForecastPr
 
                     <h3>Out-of-sample validation</h3>
                     <p className="chart-note">
-                        The last {result.validationSamples} known hours were held out
-                        from training. The baseline repeats the price from 24 hours earlier.
+                        {result.validationMethod}: every test day is predicted by a newly
+                        trained model that only sees earlier prices. Weather inputs are the
+                        {" "}{result.weatherDataMethod.toLowerCase()}. The baseline repeats
+                        the price from 24 hours earlier.
                     </p>
                     <div className="chart-container electricity-chart">
                         <ResponsiveContainer width="100%" height="100%">
@@ -307,20 +360,21 @@ function ElectricityForecast({ apiBaseUrl, backendReady }: ElectricityForecastPr
                     <p className="chart-note">
                         Simulation only. Each day the policy selects one forecast-based
                         charge/discharge cycle and settles it against held-out market prices.
+                        Return includes the battery investment and operating costs.
                     </p>
                     <div className="metric-grid trading-metrics">
                         <article>
-                            <span>Final simulated capital</span>
+                            <span>Capital after simulation</span>
                             <strong>{result.trading.finalCapital.toFixed(2)} €</strong>
                         </article>
                         <article>
-                            <span>Profit</span>
+                            <span>Operating profit</span>
                             <strong className={result.trading.profit >= 0 ? "positive" : "negative"}>
                                 {result.trading.profit >= 0 ? "+" : ""}{result.trading.profit.toFixed(2)} €
                             </strong>
                         </article>
                         <article>
-                            <span>Return</span>
+                            <span>Return on total capital</span>
                             <strong>{result.trading.returnPercent.toFixed(2)}%</strong>
                         </article>
                         <article>
@@ -331,6 +385,30 @@ function ElectricityForecast({ apiBaseUrl, backendReady }: ElectricityForecastPr
                             <span>Maximum drawdown</span>
                             <strong>{result.trading.maxDrawdownPercent.toFixed(2)}%</strong>
                         </article>
+                    </div>
+
+                    <div className="assumption-summary">
+                        Total invested: {result.trading.investedCapital.toFixed(2)} €
+                        {" "}(cash {result.trading.startingBudget.toFixed(2)} € + battery {result.trading.batteryInvestment.toFixed(2)} €).
+                        Power limit {result.trading.powerMW.toFixed(2)} MW; market/grid fee {result.trading.marketFeePerMWh.toFixed(2)} €/MWh per leg;
+                        {" "}wear {result.trading.degradationCostPerMWh.toFixed(2)} €/MWh per cycle;
+                        {" "}self-discharge {result.trading.selfDischargePercentPerDay.toFixed(2)}%/day.
+                    </div>
+
+                    <div className="trade-table-wrap">
+                        <table className="trade-table comparison-table">
+                            <thead><tr><th>Policy</th><th>Profit</th><th>Return on capital</th><th>Winning cycles</th></tr></thead>
+                            <tbody>
+                                {result.policyComparison.map((policy) => (
+                                    <tr key={policy.name}>
+                                        <td>{policy.name}</td>
+                                        <td>{policy.profit >= 0 ? "+" : ""}{policy.profit.toFixed(2)} €</td>
+                                        <td>{policy.returnPercent.toFixed(3)}%</td>
+                                        <td>{policy.winningCycles} / {policy.completedCycles}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
                     </div>
 
                     <div className="chart-container electricity-chart compact-chart">
