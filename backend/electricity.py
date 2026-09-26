@@ -382,6 +382,23 @@ def _simulate_battery_policy(
     completed_cycles = []
     revenue_share_paid = 0.0
     equity_curve = []
+    if validation:
+        first_timestamp = _iso_to_ms(validation[0]["time"])
+        equity_curve.append(
+            {
+                "time": _ms_to_iso(first_timestamp - 60 * 60 * 1000),
+                "equity": starting_budget + battery_value,
+                "event": "Starting capital",
+            }
+        )
+        if rental_cost > 0:
+            equity_curve.append(
+                {
+                    "time": _ms_to_iso(first_timestamp - 1000),
+                    "equity": cash + battery_value,
+                    "event": "Storage rent paid",
+                }
+            )
 
     for index, point in enumerate(validation):
         action = actions.get(index)
@@ -450,6 +467,7 @@ def _simulate_battery_policy(
             max_drawdown = max(max_drawdown, (peak - equity) / peak * 100)
 
     profit = cash - starting_budget
+    trading_profit_before_storage_costs = profit + rental_cost + revenue_share_paid
     return {
         "name": name,
         "storageModel": storage_model,
@@ -459,6 +477,7 @@ def _simulate_battery_policy(
         "rentalCostPerMWhDay": rental_cost_per_mwh_day,
         "operatorRevenueSharePercent": operator_revenue_share * 100,
         "revenueSharePaid": revenue_share_paid,
+        "tradingProfitBeforeStorageCosts": trading_profit_before_storage_costs,
         "investedCapital": invested_capital,
         "finalCapital": invested_capital + profit,
         "finalCash": cash,
