@@ -142,7 +142,8 @@ p {
   color: var(--text-h);
 }
 
-.forecast-controls input {
+.forecast-controls input,
+.forecast-controls select {
   width: 130px;
   box-sizing: border-box;
   padding: 8px 10px;

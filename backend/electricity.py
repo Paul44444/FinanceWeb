@@ -312,6 +312,9 @@ def _simulate_battery_policy(
     market_fee_per_mwh: float,
     degradation_cost_per_mwh: float,
     self_discharge_percent_per_day: float,
+    storage_model: str,
+    rental_cost_per_mwh_day: float,
+    operator_revenue_share: float,
     price_key: str = "predicted",
     name: str = "Model policy",
 ) -> dict:
@@ -323,13 +326,24 @@ def _simulate_battery_policy(
         actions[cycle["buyIndex"]] = ("buy", cycle_index)
         actions[cycle["sellIndex"]] = ("sell", cycle_index)
 
-    cash = starting_budget
-    battery_value = capacity_mwh * 1000 * battery_cost_per_kwh
+    simulation_days = len(validation) / 24
+    battery_value = (
+        capacity_mwh * 1000 * battery_cost_per_kwh
+        if storage_model == "owned"
+        else 0.0
+    )
+    rental_cost = (
+        capacity_mwh * rental_cost_per_mwh_day * simulation_days
+        if storage_model == "rented"
+        else 0.0
+    )
+    cash = starting_budget - rental_cost
     invested_capital = starting_budget + battery_value
     stored_energy = 0.0
     purchase_cost = 0.0
     trades = []
     completed_cycles = []
+    revenue_share_paid = 0.0
     equity_curve = []
 
     for index, point in enumerate(validation):
@@ -361,8 +375,15 @@ def _simulate_battery_policy(
             revenue = retained_energy * (
                 point["actual"] * leg_efficiency - variable_cost
             )
-            cash += revenue
-            cycle_profit = revenue - purchase_cost
+            gross_cycle_profit = revenue - purchase_cost
+            revenue_share = (
+                max(0.0, gross_cycle_profit) * operator_revenue_share
+                if storage_model == "rented"
+                else 0.0
+            )
+            revenue_share_paid += revenue_share
+            cash += revenue - revenue_share
+            cycle_profit = gross_cycle_profit - revenue_share
             completed_cycles.append(cycle_profit)
             trades.append(
                 {
@@ -394,8 +415,13 @@ def _simulate_battery_policy(
     profit = cash - starting_budget
     return {
         "name": name,
+        "storageModel": storage_model,
         "startingBudget": starting_budget,
         "batteryInvestment": battery_value,
+        "storageRentalCost": rental_cost,
+        "rentalCostPerMWhDay": rental_cost_per_mwh_day,
+        "operatorRevenueSharePercent": operator_revenue_share * 100,
+        "revenueSharePaid": revenue_share_paid,
         "investedCapital": invested_capital,
         "finalCapital": invested_capital + profit,
         "finalCash": cash,
@@ -422,6 +448,8 @@ def _future_policy_plan(
     power_mw: float,
     market_fee_per_mwh: float,
     degradation_cost_per_mwh: float,
+    storage_model: str,
+    operator_revenue_share: float,
 ) -> list[dict]:
     variable_cost = market_fee_per_mwh + degradation_cost_per_mwh / 2
     cycles = _best_daily_cycles(
@@ -433,7 +461,11 @@ def _future_policy_plan(
             "sellTime": forecast[cycle["sellIndex"]]["time"],
             "predictedBuyPrice": forecast[cycle["buyIndex"]]["predicted"],
             "predictedSellPrice": forecast[cycle["sellIndex"]]["predicted"],
-            "expectedProfit": cycle["expectedMargin"] * min(capacity_mwh, power_mw),
+            "expectedProfit": (
+                cycle["expectedMargin"]
+                * min(capacity_mwh, power_mw)
+                * (1 - operator_revenue_share if storage_model == "rented" else 1)
+            ),
         }
         for cycle in cycles
     ]
@@ -451,6 +483,9 @@ def train_electricity_forecast(
     market_fee_per_mwh: float = 3.0,
     degradation_cost_per_mwh: float = 20.0,
     self_discharge_percent_per_day: float = 0.2,
+    storage_model: str = "owned",
+    rental_cost_per_mwh_day: float = 150.0,
+    operator_revenue_share: float = 0.10,
 ) -> dict:
     if not _training_lock.acquire(blocking=False):
         raise RuntimeError("An electricity-price model is already training.")
@@ -555,6 +590,9 @@ def train_electricity_forecast(
             market_fee_per_mwh,
             degradation_cost_per_mwh,
             self_discharge_percent_per_day,
+            storage_model,
+            rental_cost_per_mwh_day,
+            operator_revenue_share,
         )
         trading_simulation = _simulate_battery_policy(*simulation_args)
         comparison_policies = [
@@ -651,6 +689,8 @@ def train_electricity_forecast(
                 power_mw,
                 market_fee_per_mwh,
                 degradation_cost_per_mwh,
+                storage_model,
+                operator_revenue_share,
             ),
             "locations": list(GERMANY_LOCATIONS.keys()),
             "sources": [

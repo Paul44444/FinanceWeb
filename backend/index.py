@@ -5,6 +5,7 @@ from pydantic import BaseModel
 import json
 import threading
 from queue import Queue
+from typing import Literal
 
 from fastapi.responses import StreamingResponse
 
@@ -40,6 +41,9 @@ class ElectricityTrainingInput(BaseModel):
     market_fee_per_mwh: float = 3.0
     degradation_cost_per_mwh: float = 20.0
     self_discharge_percent_per_day: float = 0.2
+    storage_model: Literal["owned", "rented"] = "owned"
+    rental_cost_per_mwh_day: float = 150.0
+    operator_revenue_share: float = 0.10
 
 
 @app.post("/api/electricity/train")
@@ -66,6 +70,10 @@ def train_electricity(values: ElectricityTrainingInput):
         raise HTTPException(status_code=422, detail="degradation_cost_per_mwh must be 0 to 1000")
     if not 0 <= values.self_discharge_percent_per_day <= 20:
         raise HTTPException(status_code=422, detail="self_discharge_percent_per_day must be 0 to 20")
+    if not 0 <= values.rental_cost_per_mwh_day <= 10000:
+        raise HTTPException(status_code=422, detail="rental_cost_per_mwh_day must be 0 to 10000")
+    if not 0 <= values.operator_revenue_share <= 1:
+        raise HTTPException(status_code=422, detail="operator_revenue_share must be 0 to 1")
     try:
         return train_electricity_forecast(
             values.lookback_days,
@@ -79,6 +87,9 @@ def train_electricity(values: ElectricityTrainingInput):
             values.market_fee_per_mwh,
             values.degradation_cost_per_mwh,
             values.self_discharge_percent_per_day,
+            values.storage_model,
+            values.rental_cost_per_mwh_day,
+            values.operator_revenue_share,
         )
     except RuntimeError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error

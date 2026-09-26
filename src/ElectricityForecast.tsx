@@ -40,8 +40,13 @@ interface ElectricityResult {
     weatherDataMethod: string;
     trading: {
         name: string;
+        storageModel: "owned" | "rented";
         startingBudget: number;
         batteryInvestment: number;
+        storageRentalCost: number;
+        rentalCostPerMWhDay: number;
+        operatorRevenueSharePercent: number;
+        revenueSharePaid: number;
         investedCapital: number;
         finalCapital: number;
         finalCash: number;
@@ -108,6 +113,9 @@ function ElectricityForecast({ apiBaseUrl, backendReady }: ElectricityForecastPr
     const [marketFee, setMarketFee] = useState(3);
     const [degradationCost, setDegradationCost] = useState(20);
     const [selfDischarge, setSelfDischarge] = useState(0.2);
+    const [storageModel, setStorageModel] = useState<"owned" | "rented">("rented");
+    const [rentalCost, setRentalCost] = useState(150);
+    const [operatorSharePercent, setOperatorSharePercent] = useState(10);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const [result, setResult] = useState<ElectricityResult | null>(null);
@@ -131,6 +139,9 @@ function ElectricityForecast({ apiBaseUrl, backendReady }: ElectricityForecastPr
                     market_fee_per_mwh: marketFee,
                     degradation_cost_per_mwh: degradationCost,
                     self_discharge_percent_per_day: selfDischarge,
+                    storage_model: storageModel,
+                    rental_cost_per_mwh_day: rentalCost,
+                    operator_revenue_share: operatorSharePercent / 100,
                 }),
             });
             const payload = await response.json();
@@ -234,10 +245,34 @@ function ElectricityForecast({ apiBaseUrl, backendReady }: ElectricityForecastPr
                         onChange={(event) => setChargePower(Number(event.target.value))} disabled={loading} />
                 </label>
                 <label>
-                    Battery investment (€/kWh)
-                    <input type="number" min="0" max="5000" step="10" value={batteryCost}
-                        onChange={(event) => setBatteryCost(Number(event.target.value))} disabled={loading} />
+                    Storage access
+                    <select value={storageModel}
+                        onChange={(event) => setStorageModel(event.target.value as "owned" | "rented")}
+                        disabled={loading}>
+                        <option value="rented">Rent capacity</option>
+                        <option value="owned">Own battery</option>
+                    </select>
                 </label>
+                {storageModel === "owned" ? (
+                    <label>
+                        Battery investment (€/kWh)
+                        <input type="number" min="0" max="5000" step="10" value={batteryCost}
+                            onChange={(event) => setBatteryCost(Number(event.target.value))} disabled={loading} />
+                    </label>
+                ) : (
+                    <>
+                        <label>
+                            Storage rent (€/MWh/day)
+                            <input type="number" min="0" max="10000" step="1" value={rentalCost}
+                                onChange={(event) => setRentalCost(Number(event.target.value))} disabled={loading} />
+                        </label>
+                        <label>
+                            Operator revenue share (%)
+                            <input type="number" min="0" max="100" step="1" value={operatorSharePercent}
+                                onChange={(event) => setOperatorSharePercent(Number(event.target.value))} disabled={loading} />
+                        </label>
+                    </>
+                )}
                 <label>
                     Market/grid fee (€/MWh/leg)
                     <input type="number" min="0" max="500" step="0.5" value={marketFee}
@@ -356,11 +391,11 @@ function ElectricityForecast({ apiBaseUrl, backendReady }: ElectricityForecastPr
                         </ResponsiveContainer>
                     </div>
 
-                    <h3>Simulated battery trading policy</h3>
+                    <h3>Simulated storage trading policy</h3>
                     <p className="chart-note">
                         Simulation only. Each day the policy selects one forecast-based
                         charge/discharge cycle and settles it against held-out market prices.
-                        Return includes the battery investment and operating costs.
+                        Return includes all configured storage access and operating costs.
                     </p>
                     <div className="metric-grid trading-metrics">
                         <article>
@@ -388,8 +423,21 @@ function ElectricityForecast({ apiBaseUrl, backendReady }: ElectricityForecastPr
                     </div>
 
                     <div className="assumption-summary">
-                        Total invested: {result.trading.investedCapital.toFixed(2)} €
-                        {" "}(cash {result.trading.startingBudget.toFixed(2)} € + battery {result.trading.batteryInvestment.toFixed(2)} €).
+                        {result.trading.storageModel === "rented" ? (
+                            <>
+                                Rented storage: {result.trading.rentalCostPerMWhDay.toFixed(2)} €/MWh/day,
+                                {" "}total rent {result.trading.storageRentalCost.toFixed(2)} € and
+                                {" "}{result.trading.operatorRevenueSharePercent.toFixed(1)}% operator share
+                                {" "}({result.trading.revenueSharePaid.toFixed(2)} € paid). Rental prices
+                                {" "}are user assumptions, not a live market quote.
+                            </>
+                        ) : (
+                            <>
+                                Total invested: {result.trading.investedCapital.toFixed(2)} €
+                                {" "}(cash {result.trading.startingBudget.toFixed(2)} € + battery {result.trading.batteryInvestment.toFixed(2)} €).
+                            </>
+                        )}
+                        {" "}Capacity {result.trading.capacityMWh.toFixed(2)} MWh;
                         Power limit {result.trading.powerMW.toFixed(2)} MW; market/grid fee {result.trading.marketFeePerMWh.toFixed(2)} €/MWh per leg;
                         {" "}wear {result.trading.degradationCostPerMWh.toFixed(2)} €/MWh per cycle;
                         {" "}self-discharge {result.trading.selfDischargePercentPerDay.toFixed(2)}%/day.
