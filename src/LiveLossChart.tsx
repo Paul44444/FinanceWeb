@@ -45,8 +45,11 @@ function LiveLossChart({ data }: LiveLossChartProps) {
                             dataKey="loss"
                             name="Loss"
                             stroke="#dc2626"
+                            isAnimationActive={true}
+                            animationDuration={700}
+                            animationEasing="ease-out"
                             dot={false}
-                            isAnimationActive={false}
+                            activeDot={{ r: 5 }}
                         />
                     </LineChart>
                 </ResponsiveContainer>
