@@ -83,6 +83,24 @@ p {
   margin: 0;
 }
 
+.training-iterations {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 16px 16px 0;
+  color: var(--text-h);
+}
+
+.training-iterations input {
+  width: 72px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text-h);
+  font: inherit;
+}
+
 code,
 .counter {
   font-family: var(--mono);

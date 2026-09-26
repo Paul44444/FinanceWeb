@@ -184,13 +184,14 @@ def train_loop(
         fund=None,
         fund_linear=None,
         progress_callback=None,
+        epochs_to_train=1,
 ):
     """
 
     :return:
     """
 
-    stock_history = list(data.keys())
+    stock_history = list(data.keys()) * epochs_to_train
 
     # size = len(dataloader.dataset)
     size = len(stock_history)
@@ -565,7 +566,7 @@ def self_correlate(stock):
 
     return prod1
 
-def net_1(progress_callback=None):
+def net_1(progress_callback=None, epochs_to_train=epochs):
     # info (paul): params, network
     net1 = NeuralNetwork(input_len, output_len)
     loss_fn = nn.MSELoss()  # nn.CrossEntropyLoss()
@@ -610,13 +611,14 @@ def net_1(progress_callback=None):
         fund,
         fund_linear,
         progress_callback=progress_callback,
+        epochs_to_train=epochs_to_train,
     )
 
     plt.close(fig1)
 
     return {
         "stock": stock_label,
-        "epochs": epochs,
+        "epochs": epochs_to_train,
         **result,
     }
 

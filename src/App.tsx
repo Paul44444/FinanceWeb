@@ -39,6 +39,8 @@ function App() {
 
     const [networkLoading, setNetworkLoading] =
         useState<boolean>(false);
+    const [trainingIterations, setTrainingIterations] =
+        useState<number>(5);
     const API_BASE_URL =
         import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -84,7 +86,7 @@ function App() {
         setError("");
 
         const eventSource = new EventSource(
-            `${API_BASE_URL}/api/run-network-stream`,
+            `${API_BASE_URL}/api/run-network-stream?epochs=${trainingIterations}`,
         );
 
         console.log("Training stream URL:", eventSource.url);
@@ -178,6 +180,22 @@ function App() {
                 )}
 
                 <h2>Stock neural network</h2>
+
+                <label className="training-iterations">
+                    Training iterations
+                    <input
+                        type="number"
+                        min="1"
+                        max="100"
+                        value={trainingIterations}
+                        onChange={(event) =>
+                            setTrainingIterations(
+                                Math.min(100, Math.max(1, Number(event.target.value))),
+                            )
+                        }
+                        disabled={networkLoading}
+                    />
+                </label>
 
                 <button
                     type="button"

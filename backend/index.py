@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -27,7 +27,9 @@ class CalculationInput(BaseModel):
     y: float
 
 @app.get("/api/run-network-stream")
-def run_network_stream():
+def run_network_stream(
+    epochs: int = Query(default=5, ge=1, le=100),
+):
     def event_stream():
         messages = Queue()
 
@@ -39,7 +41,10 @@ def run_network_stream():
 
         def run_training():
             try:
-                result = net_1(progress_callback=send_progress)
+                result = net_1(
+                    progress_callback=send_progress,
+                    epochs_to_train=epochs,
+                )
 
                 messages.put({
                     "type": "complete",
@@ -97,9 +102,9 @@ def calculate(values: CalculationInput):
     }
 
 @app.post("/api/run-network")
-def run_network():
+def run_network(epochs: int = Query(default=5, ge=1, le=100)):
     try:
-        result = net_1()
+        result = net_1(epochs_to_train=epochs)
 
         return {
             "success": True,
