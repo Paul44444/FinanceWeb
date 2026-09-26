@@ -58,6 +58,7 @@ interface ElectricityResult {
         startingBudget: number;
         batteryInvestment: number;
         storageRentalCost: number;
+        hourlyRentalCost: number;
         rentalCostPerMWhDay: number;
         operatorRevenueSharePercent: number;
         revenueSharePaid: number;
@@ -457,6 +458,7 @@ function ElectricityForecast({ apiBaseUrl, backendReady }: ElectricityForecastPr
                             <>
                                 Rented storage: {result.trading.rentalCostPerMWhDay.toFixed(2)} €/MWh/day,
                                 {" "}total rent {result.trading.storageRentalCost.toFixed(2)} € and
+                                {" "}{result.trading.hourlyRentalCost.toFixed(2)} € accrued each hour;
                                 {" "}{result.trading.operatorRevenueSharePercent.toFixed(1)}% operator share
                                 {" "}({result.trading.revenueSharePaid.toFixed(2)} € paid). Trading earned
                                 {" "}{result.trading.tradingProfitBeforeStorageCosts.toFixed(2)} € before those storage costs. Rental prices
@@ -506,8 +508,8 @@ function ElectricityForecast({ apiBaseUrl, backendReady }: ElectricityForecastPr
                     </div>
 
                     <p className="chart-note">
-                        The equity curve starts with the full capital, shows the storage-rent deduction,
-                        and then the gains and losses from each trade.
+                        The equity curve starts with the full capital. Storage rent is accrued hourly,
+                        while trade gains, losses and operator revenue share are booked when they occur.
                     </p>
 
                     <div className="chart-container electricity-chart compact-chart">

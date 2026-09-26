@@ -374,7 +374,8 @@ def _simulate_battery_policy(
         if storage_model == "rented"
         else 0.0
     )
-    cash = starting_budget - rental_cost
+    hourly_rental_cost = rental_cost / len(validation) if validation else 0.0
+    cash = starting_budget
     invested_capital = starting_budget + battery_value
     stored_energy = 0.0
     purchase_cost = 0.0
@@ -391,16 +392,9 @@ def _simulate_battery_policy(
                 "event": "Starting capital",
             }
         )
-        if rental_cost > 0:
-            equity_curve.append(
-                {
-                    "time": _ms_to_iso(first_timestamp - 1000),
-                    "equity": cash + battery_value,
-                    "event": "Storage rent paid",
-                }
-            )
 
     for index, point in enumerate(validation):
+        cash -= hourly_rental_cost
         action = actions.get(index)
         if action and action[0] == "buy" and stored_energy == 0:
             cost_per_mwh = point["actual"] / leg_efficiency + variable_cost
@@ -474,6 +468,7 @@ def _simulate_battery_policy(
         "startingBudget": starting_budget,
         "batteryInvestment": battery_value,
         "storageRentalCost": rental_cost,
+        "hourlyRentalCost": hourly_rental_cost,
         "rentalCostPerMWhDay": rental_cost_per_mwh_day,
         "operatorRevenueSharePercent": operator_revenue_share * 100,
         "revenueSharePaid": revenue_share_paid,
