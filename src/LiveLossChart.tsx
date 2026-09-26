@@ -30,7 +30,7 @@ function LiveLossChart({ data }: LiveLossChartProps) {
                         <XAxis
                             dataKey="step"
                             label={{
-                                value: "Training step",
+                                value: "Data update",
                                 position: "insideBottom",
                                 offset: -5,
                             }}

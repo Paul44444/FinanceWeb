@@ -33,6 +33,12 @@ function App() {
 
     const [trainingProgress, setTrainingProgress] =
         useState<number>(0);
+    const [trainingRound, setTrainingRound] =
+        useState<number>(0);
+    const [stepInRound, setStepInRound] =
+        useState<number>(0);
+    const [stepsPerRound, setStepsPerRound] =
+        useState<number>(0);
 
     const [networkResult, setNetworkResult] =
         useState<NetworkResult | null>(null);
@@ -83,6 +89,9 @@ function App() {
         setNetworkResult(null);
         setLiveLossData([]);
         setTrainingProgress(0);
+        setTrainingRound(0);
+        setStepInRound(0);
+        setStepsPerRound(0);
         setError("");
 
         const eventSource = new EventSource(
@@ -105,6 +114,9 @@ function App() {
                 setTrainingProgress(
                     Math.round((message.step / message.total) * 100),
                 );
+                setTrainingRound(message.epoch);
+                setStepInRound(message.step_in_epoch);
+                setStepsPerRound(message.steps_per_epoch);
             }
 
             if (message.type === "complete") {
@@ -182,7 +194,7 @@ function App() {
                 <h2>Stock neural network</h2>
 
                 <label className="training-iterations">
-                    Training iterations
+                    Training rounds
                     <input
                         type="number"
                         min="1"
@@ -210,10 +222,14 @@ function App() {
                 {(networkLoading || liveLossData.length > 0) && (
                     <section>
                         <p>
-                            Training progress: {trainingProgress}%{" "}
+                            Training round: {trainingRound} of {trainingIterations}
+                            {stepsPerRound > 0 && (
+                                <> · data update: {stepInRound} of {stepsPerRound}</>
+                            )}
+                            {" "}({trainingProgress}%)
                             <span className="training-hint">
-                                (live updates normally arrive every few seconds; the first update can
-                                take longer while stock data is downloaded)
+                                (the chart shows individual data updates; the first update can take
+                                longer while stock data is downloaded)
                             </span>
                         </p>
 

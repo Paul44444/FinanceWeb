@@ -191,6 +191,7 @@ def train_loop(
     :return:
     """
 
+    steps_per_epoch = len(data)
     stock_history = list(data.keys()) * epochs_to_train
 
     # size = len(dataloader.dataset)
@@ -275,6 +276,10 @@ def train_loop(
                 progress_callback({
                     "step": i + 1,
                     "total": size,
+                    "epoch": (i // steps_per_epoch) + 1,
+                    "epochs": epochs_to_train,
+                    "step_in_epoch": (i % steps_per_epoch) + 1,
+                    "steps_per_epoch": steps_per_epoch,
                     "loss": float(loss.item()),
                     "loss_simple": float(
                         loss_simple.detach().cpu().item()
