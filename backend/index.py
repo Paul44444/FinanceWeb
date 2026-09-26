@@ -44,6 +44,7 @@ class ElectricityTrainingInput(BaseModel):
     storage_model: Literal["owned", "rented"] = "owned"
     rental_cost_per_mwh_day: float = 150.0
     operator_revenue_share: float = 0.10
+    use_benchmark_storage_costs: bool = True
 
 
 @app.post("/api/electricity/train")
@@ -90,6 +91,7 @@ def train_electricity(values: ElectricityTrainingInput):
             values.storage_model,
             values.rental_cost_per_mwh_day,
             values.operator_revenue_share,
+            values.use_benchmark_storage_costs,
         )
     except RuntimeError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error

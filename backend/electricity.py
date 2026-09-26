@@ -29,6 +29,19 @@ GERMANY_LOCATIONS = {
 _training_lock = Lock()
 _latest_model: dict | None = None
 
+STORAGE_BENCHMARK_2026 = {
+    "name": "German utility-scale BESS benchmark",
+    "vintage": 2026,
+    "capexPerKW": 400.0,
+    "gridConnectionPerKW": 100.0,
+    "opexPerKWhYear": 12.0,
+    "lifetimeYears": 15,
+    "availability": 0.95,
+    "financingRate": 0.08,
+    "revenueShare": 0.06,
+    "sourceUrl": "https://www.bundesnetzagentur.de/DE/Beschlusskammern/GBK/GBK_Termine/Downloads/2026/01_2026/30_01/4_BVES_ECO.pdf?__blob=publicationFile&v=2",
+}
+
 
 class ElectricityPriceNetwork(nn.Module):
     def __init__(self, feature_count: int):
@@ -216,6 +229,30 @@ def _metrics(actual: np.ndarray, predicted: np.ndarray) -> dict[str, float]:
     if len(actual) > 1 and np.std(actual) > 0 and np.std(predicted) > 0:
         correlation = float(np.corrcoef(actual, predicted)[0, 1])
     return {"mae": mae, "rmse": rmse, "correlation": correlation}
+
+
+def _calibrated_storage_rent(capacity_mwh: float, power_mw: float) -> tuple[float, dict]:
+    benchmark = dict(STORAGE_BENCHMARK_2026)
+    rate = benchmark["financingRate"]
+    years = benchmark["lifetimeYears"]
+    capital_recovery_factor = rate * (1 + rate) ** years / ((1 + rate) ** years - 1)
+    annual_capital_cost = (
+        power_mw
+        * 1000
+        * (benchmark["capexPerKW"] + benchmark["gridConnectionPerKW"])
+        * capital_recovery_factor
+    )
+    annual_opex = capacity_mwh * 1000 * benchmark["opexPerKWhYear"]
+    annual_cost = (annual_capital_cost + annual_opex) / benchmark["availability"]
+    rent = annual_cost / 365 / capacity_mwh
+    benchmark.update(
+        {
+            "capitalRecoveryFactor": capital_recovery_factor,
+            "annualizedCost": annual_cost,
+            "calculatedRentPerMWhDay": rent,
+        }
+    )
+    return rent, benchmark
 
 
 def _fit_model(
@@ -486,6 +523,7 @@ def train_electricity_forecast(
     storage_model: str = "owned",
     rental_cost_per_mwh_day: float = 150.0,
     operator_revenue_share: float = 0.10,
+    use_benchmark_storage_costs: bool = True,
 ) -> dict:
     if not _training_lock.acquire(blocking=False):
         raise RuntimeError("An electricity-price model is already training.")
@@ -580,6 +618,13 @@ def train_electricity_forecast(
             }
             for index, sample in enumerate(validation_samples)
         ]
+        storage_benchmark = None
+        if storage_model == "rented" and use_benchmark_storage_costs:
+            rental_cost_per_mwh_day, storage_benchmark = _calibrated_storage_rent(
+                capacity_mwh, power_mw
+            )
+            operator_revenue_share = STORAGE_BENCHMARK_2026["revenueShare"]
+
         simulation_args = (
             validation,
             starting_budget,
@@ -682,6 +727,7 @@ def train_electricity_forecast(
             "policyComparison": comparison_policies,
             "validationMethod": "Daily expanding-window walk-forward",
             "weatherDataMethod": "Archived weather forecast issued 24 hours earlier",
+            "storageBenchmark": storage_benchmark,
             "plannedTrades": _future_policy_plan(
                 forecast,
                 capacity_mwh,

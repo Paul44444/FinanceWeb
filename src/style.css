@@ -272,6 +272,15 @@ p {
   text-align: left;
 }
 
+.benchmark-summary {
+  display: grid;
+  gap: 5px;
+}
+
+.benchmark-summary strong {
+  color: var(--text-h);
+}
+
 .planned-trades article {
   padding: 12px 14px;
   border: 1px solid var(--border);

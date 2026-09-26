@@ -38,6 +38,20 @@ interface ElectricityResult {
     locations: string[];
     validationMethod: string;
     weatherDataMethod: string;
+    storageBenchmark: null | {
+        name: string;
+        vintage: number;
+        capexPerKW: number;
+        gridConnectionPerKW: number;
+        opexPerKWhYear: number;
+        lifetimeYears: number;
+        availability: number;
+        financingRate: number;
+        revenueShare: number;
+        annualizedCost: number;
+        calculatedRentPerMWhDay: number;
+        sourceUrl: string;
+    };
     trading: {
         name: string;
         storageModel: "owned" | "rented";
@@ -107,15 +121,16 @@ function ElectricityForecast({ apiBaseUrl, backendReady }: ElectricityForecastPr
     const [forecastHours, setForecastHours] = useState(48);
     const [startingBudget, setStartingBudget] = useState(1000);
     const [storageCapacity, setStorageCapacity] = useState(1);
-    const [efficiencyPercent, setEfficiencyPercent] = useState(90);
+    const [efficiencyPercent, setEfficiencyPercent] = useState(88);
     const [chargePower, setChargePower] = useState(0.5);
     const [batteryCost, setBatteryCost] = useState(400);
     const [marketFee, setMarketFee] = useState(3);
-    const [degradationCost, setDegradationCost] = useState(20);
+    const [degradationCost, setDegradationCost] = useState(0);
     const [selfDischarge, setSelfDischarge] = useState(0.2);
     const [storageModel, setStorageModel] = useState<"owned" | "rented">("rented");
     const [rentalCost, setRentalCost] = useState(150);
-    const [operatorSharePercent, setOperatorSharePercent] = useState(10);
+    const [operatorSharePercent, setOperatorSharePercent] = useState(6);
+    const [useBenchmarkCosts, setUseBenchmarkCosts] = useState(true);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const [result, setResult] = useState<ElectricityResult | null>(null);
@@ -142,6 +157,7 @@ function ElectricityForecast({ apiBaseUrl, backendReady }: ElectricityForecastPr
                     storage_model: storageModel,
                     rental_cost_per_mwh_day: rentalCost,
                     operator_revenue_share: operatorSharePercent / 100,
+                    use_benchmark_storage_costs: useBenchmarkCosts,
                 }),
             });
             const payload = await response.json();
@@ -262,15 +278,28 @@ function ElectricityForecast({ apiBaseUrl, backendReady }: ElectricityForecastPr
                 ) : (
                     <>
                         <label>
-                            Storage rent (€/MWh/day)
-                            <input type="number" min="0" max="10000" step="1" value={rentalCost}
-                                onChange={(event) => setRentalCost(Number(event.target.value))} disabled={loading} />
+                            Rental cost basis
+                            <select value={useBenchmarkCosts ? "benchmark" : "manual"}
+                                onChange={(event) => setUseBenchmarkCosts(event.target.value === "benchmark")}
+                                disabled={loading}>
+                                <option value="benchmark">Research benchmark</option>
+                                <option value="manual">Manual contract</option>
+                            </select>
                         </label>
-                        <label>
-                            Operator revenue share (%)
-                            <input type="number" min="0" max="100" step="1" value={operatorSharePercent}
-                                onChange={(event) => setOperatorSharePercent(Number(event.target.value))} disabled={loading} />
-                        </label>
+                        {!useBenchmarkCosts && (
+                            <>
+                                <label>
+                                    Storage rent (€/MWh/day)
+                                    <input type="number" min="0" max="10000" step="1" value={rentalCost}
+                                        onChange={(event) => setRentalCost(Number(event.target.value))} disabled={loading} />
+                                </label>
+                                <label>
+                                    Operator revenue share (%)
+                                    <input type="number" min="0" max="100" step="1" value={operatorSharePercent}
+                                        onChange={(event) => setOperatorSharePercent(Number(event.target.value))} disabled={loading} />
+                                </label>
+                            </>
+                        )}
                     </>
                 )}
                 <label>
@@ -279,7 +308,7 @@ function ElectricityForecast({ apiBaseUrl, backendReady }: ElectricityForecastPr
                         onChange={(event) => setMarketFee(Number(event.target.value))} disabled={loading} />
                 </label>
                 <label>
-                    Battery wear (€/MWh cycle)
+                    Throughput/wear fee (€/MWh cycle)
                     <input type="number" min="0" max="1000" step="1" value={degradationCost}
                         onChange={(event) => setDegradationCost(Number(event.target.value))} disabled={loading} />
                 </label>
@@ -442,6 +471,21 @@ function ElectricityForecast({ apiBaseUrl, backendReady }: ElectricityForecastPr
                         {" "}wear {result.trading.degradationCostPerMWh.toFixed(2)} €/MWh per cycle;
                         {" "}self-discharge {result.trading.selfDischargePercentPerDay.toFixed(2)}%/day.
                     </div>
+
+                    {result.storageBenchmark && (
+                        <div className="assumption-summary benchmark-summary">
+                            <strong>{result.storageBenchmark.name} ({result.storageBenchmark.vintage})</strong>
+                            <span>
+                                Calculated rent {result.storageBenchmark.calculatedRentPerMWhDay.toFixed(2)} €/MWh/day from
+                                {" "}{result.storageBenchmark.capexPerKW.toFixed(0)} €/kW system CAPEX,
+                                {" "}{result.storageBenchmark.gridConnectionPerKW.toFixed(0)} €/kW grid connection,
+                                {" "}{result.storageBenchmark.opexPerKWhYear.toFixed(0)} €/kWh/year OPEX,
+                                {" "}{result.storageBenchmark.lifetimeYears} years, {(result.storageBenchmark.availability * 100).toFixed(0)}% availability and
+                                {" "}a {(result.storageBenchmark.financingRate * 100).toFixed(0)}% model assumption for financing/required return.
+                                {" "}<a href={result.storageBenchmark.sourceUrl} target="_blank" rel="noreferrer">Published benchmark inputs</a>.
+                            </span>
+                        </div>
+                    )}
 
                     <div className="trade-table-wrap">
                         <table className="trade-table comparison-table">
