@@ -1,0 +1,14 @@
+[Unit]
+Description=Finance1 temporary Cloudflare tunnel
+After=network-online.target finance1-backend.service
+Wants=network-online.target finance1-backend.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/paul/WebstormProjects/finance1
+ExecStart=/home/paul/WebstormProjects/finance1/scripts/run-quick-tunnel.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

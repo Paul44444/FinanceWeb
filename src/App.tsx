@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import NetworkCharts from "./NetworkCharts";
 
@@ -41,8 +41,34 @@ function App() {
         useState<boolean>(false);
     const [trainingIterations, setTrainingIterations] =
         useState<number>(200);
-    const API_BASE_URL =
-        import.meta.env.VITE_API_BASE_URL ?? "";
+    const [apiBaseUrl, setApiBaseUrl] = useState<string>("");
+    const [backendReady, setBackendReady] = useState<boolean>(import.meta.env.DEV);
+
+    useEffect(() => {
+        if (import.meta.env.DEV) {
+            return;
+        }
+
+        fetch("/backend.json", { cache: "no-store" })
+            .then((response) => {
+                if (!response.ok) {
+                    throw new Error(`Backend configuration returned ${response.status}`);
+                }
+                return response.json();
+            })
+            .then((configuration: { url?: string }) => {
+                const url = configuration.url?.replace(/\/$/, "");
+                if (!url?.startsWith("https://")) {
+                    throw new Error("No public backend URL is configured.");
+                }
+                setApiBaseUrl(url);
+                setBackendReady(true);
+            })
+            .catch((configurationError) => {
+                console.error(configurationError);
+                setError("The Python backend is currently unavailable.");
+            });
+    }, []);
 
     async function handleCalculate(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
@@ -51,7 +77,7 @@ function App() {
         setError("");
 
         try {
-            const response = await fetch(`${API_BASE_URL}/api/calculate`, {
+            const response = await fetch(`${apiBaseUrl}/api/calculate`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -86,7 +112,7 @@ function App() {
         setError("");
 
         const eventSource = new EventSource(
-            `${API_BASE_URL}/api/run-network-stream?iterations=${trainingIterations}`,
+            `${apiBaseUrl}/api/run-network-stream?iterations=${trainingIterations}`,
         );
 
         console.log("Training stream URL:", eventSource.url);
@@ -200,9 +226,11 @@ function App() {
                 <button
                     type="button"
                     onClick={runNetwork}
-                    disabled={networkLoading}
+                    disabled={networkLoading || !backendReady}
                 >
-                    {networkLoading
+                    {!backendReady
+                        ? "Connecting backend..."
+                        : networkLoading
                         ? "Training network..."
                         : "Run neural network"}
                 </button>

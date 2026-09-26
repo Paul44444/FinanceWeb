@@ -1,0 +1,18 @@
+[Unit]
+Description=Finance1 Python backend (user service)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/paul/WebstormProjects/finance1
+ExecStart=/home/paul/miniconda3/envs/financeweb/bin/python -m uvicorn backend.index:app --host 127.0.0.1 --port 8001
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=MPLCONFIGDIR=/tmp/finance1-matplotlib
+
+[Install]
+WantedBy=default.target
