@@ -259,6 +259,7 @@ def _fit_model(
     samples: list[tuple[int, list[float], float]],
     iterations: int,
     seed: int,
+    weight_decay: float = 0.0,
 ) -> tuple[ElectricityPriceNetwork, np.ndarray, np.ndarray, float, float, list[dict]]:
     torch.manual_seed(seed)
     x_values = np.asarray([sample[1] for sample in samples], dtype=np.float32)
@@ -273,7 +274,9 @@ def _fit_model(
     x_train = torch.tensor((x_values - x_mean) / x_scale)
     y_train = torch.tensor((y_values - y_mean) / y_scale)
     model = ElectricityPriceNetwork(x_train.shape[1])
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.006)
+    optimizer = torch.optim.Adam(
+        model.parameters(), lr=0.006, weight_decay=weight_decay
+    )
     loss_function = nn.SmoothL1Loss()
     loss_history = []
     report_every = max(1, iterations // 120)

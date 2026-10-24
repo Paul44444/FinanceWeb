@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 
 from backend.main import net_1
 from backend.electricity import train_electricity_forecast
+from backend.gas import train_gas_forecast
 
 app = FastAPI()
 app.add_middleware(
@@ -97,6 +98,64 @@ def train_electricity(values: ElectricityTrainingInput):
         raise HTTPException(status_code=409, detail=str(error)) from error
     except Exception as error:
         raise HTTPException(status_code=500, detail=str(error)) from error
+
+@app.get("/api/gas/train-stream")
+def train_gas_stream(
+    lookback_days: int = Query(default=900, ge=200, le=1200),
+    iterations: int = Query(default=300, ge=50, le=2000),
+    test_days: int = Query(default=60, ge=10, le=250),
+    starting_budget: float = Query(default=1000.0, ge=100, le=1_000_000),
+    instrument: Literal["cfd", "future"] = "cfd",
+    leverage: float = Query(default=1.0, gt=0, le=10),
+    spread_per_mwh: float = Query(default=0.20, ge=0, le=10),
+    commission_per_mwh: float = Query(default=0.0, ge=0, le=10),
+    financing_rate: float = Query(default=0.06, ge=0, le=0.5),
+    margin_rate: float = Query(default=0.10, ge=0.01, le=1),
+    contract_size_mwh: float = Query(default=730.0, ge=0.01, le=10000),
+):
+    def event_stream():
+        messages = Queue()
+
+        def run_training():
+            try:
+                result = train_gas_forecast(
+                    lookback_days,
+                    iterations,
+                    test_days,
+                    starting_budget,
+                    instrument,
+                    leverage,
+                    spread_per_mwh,
+                    commission_per_mwh,
+                    financing_rate,
+                    margin_rate,
+                    contract_size_mwh,
+                    progress_callback=lambda progress: messages.put(
+                        {"type": "progress", **progress}
+                    ),
+                )
+                messages.put({"type": "complete", "data": result})
+            except Exception as error:
+                messages.put({"type": "error", "message": str(error)})
+            finally:
+                messages.put(None)
+
+        threading.Thread(target=run_training, daemon=True).start()
+
+        while True:
+            message = messages.get()
+            if message is None:
+                break
+            yield f"data: {json.dumps(message)}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 @app.get("/api/run-network-stream")
 def run_network_stream(

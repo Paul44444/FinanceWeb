@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import NetworkCharts from "./NetworkCharts";
 import ElectricityForecast from "./ElectricityForecast";
+import GasForecast from "./GasForecast";
 
 import LiveLossChart from "./LiveLossChart";
 import type { LiveLossPoint } from "./LiveLossChart";
@@ -23,7 +24,7 @@ interface NetworkResult {
 }
 
 function App() {
-    const [activeView, setActiveView] = useState<"stocks" | "electricity">("electricity");
+    const [activeView, setActiveView] = useState<"stocks" | "electricity" | "gas">("electricity");
     const [x, setX] = useState<number>(5);
     const [y, setY] = useState<number>(7);
     const [result, setResult] = useState<number | null>(null);
@@ -171,6 +172,13 @@ function App() {
                     </button>
                     <button
                         type="button"
+                        className={activeView === "gas" ? "active" : ""}
+                        onClick={() => setActiveView("gas")}
+                    >
+                        Gas forecast
+                    </button>
+                    <button
+                        type="button"
                         className={activeView === "stocks" ? "active" : ""}
                         onClick={() => setActiveView("stocks")}
                     >
@@ -180,6 +188,11 @@ function App() {
 
                 {activeView === "electricity" ? (
                     <ElectricityForecast
+                        apiBaseUrl={apiBaseUrl}
+                        backendReady={backendReady}
+                    />
+                ) : activeView === "gas" ? (
+                    <GasForecast
                         apiBaseUrl={apiBaseUrl}
                         backendReady={backendReady}
                     />

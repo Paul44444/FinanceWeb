@@ -37,3 +37,5 @@ venv/
 .env
 .env.*
 !.env.example
+# Backend data caches
+backend/.cache/
